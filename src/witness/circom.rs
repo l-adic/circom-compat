@@ -1,3 +1,5 @@
+use core::hash;
+
 use color_eyre::Result;
 use wasmer::{Function, Instance, Store, Value};
 
@@ -73,6 +75,7 @@ impl Circom1 for Wasm {
         hash_lsb: u32,
     ) -> Result<()> {
         let func = self.func("getSignalOffset32");
+        print!("getSignalOffset32: {} {}", hash_msb, hash_lsb);
         func.call(
             store,
             &[
@@ -165,8 +168,10 @@ impl CircomBase for Wasm {
     }
 
     fn get_u32(&self, store: &mut Store, name: &str) -> Result<u32> {
+        println!("get_u32: {}", name);
         let func = &self.func(name);
         let result = func.call(store, &[])?;
+        println!("result: {:?}", result);
         Ok(result[0].unwrap_i32() as u32)
     }
 

@@ -170,7 +170,7 @@ impl Header {
         if size != 32 + field_size as u64 {
             return Err(IoError(Error::new(
                 ErrorKind::InvalidData,
-                "Invalid header section size",
+                "Invalid header section size {}",
             )));
         }
 
@@ -232,7 +232,7 @@ fn read_map<R: Read>(mut reader: R, size: u64, header: &Header) -> IoResult<Vec<
     if size != header.n_wires as u64 * 8 {
         return Err(IoError(Error::new(
             ErrorKind::InvalidData,
-            "Invalid map section size",
+            format!("Invalid map section size {} {}", size, header.n_wires * 8),
         )));
     }
     let mut vec = Vec::with_capacity(header.n_wires as usize);

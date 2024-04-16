@@ -4,6 +4,7 @@ use num_bigint::BigInt;
 use num_traits::Zero;
 // use std::cell::Cell;
 use wasmer::{imports, Function, Instance, Memory, MemoryType, Module, RuntimeError, Store};
+use wasmer_wasix::WasiEnv;
 
 #[cfg(feature = "circom-2")]
 use num::ToPrimitive;
@@ -64,7 +65,9 @@ impl WitnessCalculator {
     pub fn from_module(store: &mut Store, module: Module) -> Result<Self> {
         // Set up the memory
         let memory = Memory::new(store, MemoryType::new(2000, None, false)).unwrap();
-        let import_object = imports! {
+        // Create the `WasiEnv`.
+
+        let mut import_object = imports! {
             "env" => {
                 "memory" => memory.clone(),
             },
@@ -82,9 +85,16 @@ impl WitnessCalculator {
                 "writeBufferMessage" => runtime::write_buffer_message(store),
             }
         };
+        let mut wasi_env = WasiEnv::builder("calculateWitness").finalize(store)?;
+        let wasi_env_imports = wasi_env.import_object(store, &module)?;
+        import_object.extend(&wasi_env_imports);
         let instance = Wasm::new(Instance::new(store, &module, &import_object)?);
+        wasi_env.initialize(store, instance.instance.clone())?;
+        instance.init(store, false)?;
+        // let x = wasi_env.env.as_mut(store);
 
         let version = instance.get_version(store).unwrap_or(1);
+        println!("Circom version: {}", version);
 
         // Circom 2 feature flag with version 2
         #[cfg(feature = "circom-2")]
@@ -93,8 +103,12 @@ impl WitnessCalculator {
             store: &mut Store,
             version: u32,
         ) -> Result<WitnessCalculator> {
+            println!("new_circom2");
             let n32 = instance.get_field_num_len32(store)?;
+            println!("n32: {}", n32);
             instance.get_raw_prime(store)?;
+            println!("here");
+
             let mut arr = vec![0; n32 as usize];
             for i in 0..n32 {
                 let res = instance.read_shared_rw_memory(store, i)?;
@@ -103,6 +117,8 @@ impl WitnessCalculator {
             let prime = from_array32(arr);
 
             let n64 = ((prime.bits() - 1) / 64 + 1) as u32;
+
+            println!("Prime: {}", prime);
 
             Ok(WitnessCalculator {
                 instance,
@@ -163,8 +179,6 @@ impl WitnessCalculator {
         inputs: I,
         sanity_check: bool,
     ) -> Result<Vec<BigInt>> {
-        self.instance.init(store, sanity_check)?;
-
         cfg_if::cfg_if! {
             if #[cfg(feature = "circom-2")] {
                 match self.circom_version {
@@ -185,8 +199,6 @@ impl WitnessCalculator {
         inputs: I,
         sanity_check: bool,
     ) -> Result<Vec<BigInt>> {
-        self.instance.init(store, sanity_check)?;
-
         let old_mem_free_pos = self.memory.as_ref().unwrap().free_pos(store)?;
         let p_sig_offset = self.memory.as_mut().unwrap().alloc_u32(store)?;
         let p_fr = self.memory.as_mut().unwrap().alloc_fr(store)?;
@@ -240,8 +252,6 @@ impl WitnessCalculator {
         inputs: I,
         sanity_check: bool,
     ) -> Result<Vec<BigInt>> {
-        self.instance.init(store, sanity_check)?;
-
         let n32 = self.instance.get_field_num_len32(store)?;
 
         // allocate the inputs
@@ -263,16 +273,21 @@ impl WitnessCalculator {
 
         let mut w = Vec::new();
 
+        print!("get_witness_size");
         let witness_size = self.instance.get_witness_size(store)?;
+        println!("witness_size: {}", witness_size);
         for i in 0..witness_size {
+            print!("get_witness {:?}", i);
             self.instance.get_witness(store, i)?;
             let mut arr = vec![0; n32 as usize];
             for j in 0..n32 {
+                print!("read_shared_rw_memory {:?}", (i, j));
                 arr[(n32 as usize) - 1 - (j as usize)] =
                     self.instance.read_shared_rw_memory(store, j)?;
             }
             w.push(from_array32(arr));
         }
+        print!("witness: {:?}", w);
 
         Ok(w)
     }
